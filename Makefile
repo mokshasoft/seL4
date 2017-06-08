@@ -177,6 +177,9 @@ ifneq (${CONFIG_KERNEL_COMPILER},"")
 CC = ${CONFIG_KERNEL_COMPILER}
 # Assume that this is a non-GNU compiler.
 CPPFLAGS += -U__GNUC__
+ifeq (${CONFIG_KERNEL_COMPILER},"clang")
+CLANG = 1
+endif
 endif
 endif
 endif
@@ -480,6 +483,19 @@ endif
 CFLAGS += ${DEFINES}
 CPPFLAGS += ${DEFINES} ${INCLUDES}
 
+# clang x86-64 target
+ifdef CLANG
+CPPFLAGS += -D__clang__
+# Many of these warnings should probably be fixed...
+CFLAGS += -Wno-enum-conversion -Wimplicit-function-declaration \
+          -Wno-sometimes-uninitialized -Wno-unused-function \
+          -Wno-shift-negative-value -Wno-tautological-compare
+# Run the native linker
+CFLAGS += -fno-integrated-as
+ASFLAGS += -fno-integrated-as
+CLANG_LDFLAGS = $(filter-out -Wl$(comma)%,$(LDFLAGS))
+endif
+
 ifdef BUILD_VERBOSE
 $(info CFLAGS   = ${CFLAGS})
 $(info ASFLAGS  = ${ASFLAGS})
@@ -638,8 +654,13 @@ linker.lds_pp: ${LINKER_SCRIPT}
 
 kernel.elf: ${OBJECTS} linker.lds_pp
 	@echo " [LD] $@"
-	$(Q)${CHANGED} $@ ${CC} ${LDFLAGS} -T linker.lds_pp -Wl,-n \
-	     -o $@ ${OBJECTS}
+	$(Q)if [ -z "${CLANG}" ] ; then \
+	${CHANGED} $@ ${CC} ${LDFLAGS} -T linker.lds_pp -Wl,-n \
+	     -o $@ ${OBJECTS} ; \
+	else \
+	${CHANGED} $@ ${LD} ${CLANG_LDFLAGS} -T linker.lds_pp -n \
+	     -o $@ ${OBJECTS} ; \
+	fi
 
 ############################################################
 ### Pattern rules
