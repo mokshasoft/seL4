@@ -177,6 +177,9 @@ ifneq (${CONFIG_KERNEL_COMPILER},"")
 CC = ${CONFIG_KERNEL_COMPILER}
 # Assume that this is a non-GNU compiler.
 CPPFLAGS += -U__GNUC__
+ifeq (${CONFIG_KERNEL_COMPILER},"clang")
+    CLANG = 1
+endif
 endif
 endif
 endif
@@ -480,6 +483,52 @@ endif
 CFLAGS += ${DEFINES}
 CPPFLAGS += ${DEFINES} ${INCLUDES}
 
+# Set specific kernel build flags for clang
+ifdef CLANG
+    ifndef CLANG_TARGET_TRIPPLE
+        $(error CLANG_TARGET_TRIPPLE not defined)
+    endif
+    CCP = ${CONFIG_KERNEL_COMPILER} --target=${CLANG_TARGET_TRIPPLE}
+    CC = ${CONFIG_KERNEL_COMPILER} --target=${CLANG_TARGET_TRIPPLE}
+    CPPFLAGS += -D__clang__
+    ifeq (${ARCH}, x86)
+        # https://github.com/seL4/seL4/issues/62
+        CFLAGS += -Wno-sometimes-uninitialized
+        # irq_t ret = x86KSPendingInterrupt;
+        # x86KScurInterrupt = servicePendingIRQ();
+        CFLAGS += -Wno-enum-conversion
+        # kernel/libsel4/sel4_plat_include/pc99/sel4/plat/api/constants.h:#define seL4_FirstWatchpoint (-1)
+        CFLAGS += -Wno-tautological-constant-out-of-range-compare
+    endif
+    ifeq (${SEL4_ARCH}, ia32)
+        # This seems to be a real error!
+        #/home/sel4/Repo/seL4/TestSuite/sel4test2/kernel/src/fastpath/fastpath.c:172:37: error: variable 'stored_hw_asid' is uninitialized when used
+        #      here [-Werror,-Wuninitialized]
+        #    switchToThread_fp(dest, cap_pd, stored_hw_asid);
+        #                                    ^~~~~~~~~~~~~~
+        CFLAGS += -Wno-uninitialized
+    endif
+    ifeq (${SEL4_ARCH}, x86_64)
+        # kernel/tools/bitfield_gen.py generates a shift of a negative value 0 times
+        CFLAGS += -Wno-shift-negative-value
+    endif
+    ifeq (${ARCH}, arm)
+        #CLFAGS += -Wimplicit-function-declaration
+        # ./kernel/src/arch/arm/armv/armv7-a/cache.c:13:20: error: unused function 'invalidateByWSL'
+        #       [-Werror,-Wunused-function]
+        # static inline void invalidateByWSL(word_t wsl)
+        #                    ^
+        # 1 error generated.
+        CFLAGS += -Wno-unused-function
+    endif
+    # Run the GCC linker
+    ifeq (${SEL4_ARCH}, x86_64)
+        CFLAGS += -fno-integrated-as
+        ASFLAGS += -fno-integrated-as
+    endif
+    CLANG_LDFLAGS = $(filter-out -Wl$(comma)%,$(LDFLAGS))
+endif
+
 ifdef BUILD_VERBOSE
 $(info CFLAGS   = ${CFLAGS})
 $(info ASFLAGS  = ${ASFLAGS})
@@ -638,8 +687,13 @@ linker.lds_pp: ${LINKER_SCRIPT}
 
 kernel.elf: ${OBJECTS} linker.lds_pp
 	@echo " [LD] $@"
-	$(Q)${CHANGED} $@ ${CC} ${LDFLAGS} -T linker.lds_pp -Wl,-n \
-	     -o $@ ${OBJECTS}
+	$(Q)if [ -z "${CLANG}" ] ; then \
+	${CHANGED} $@ ${CC} ${LDFLAGS} -T linker.lds_pp -Wl,-n \
+	     -o $@ ${OBJECTS} ; \
+	else \
+	${CHANGED} $@ ${LD} ${CLANG_LDFLAGS} -T linker.lds_pp -n \
+	     -o $@ ${OBJECTS} ; \
+	fi
 
 ############################################################
 ### Pattern rules
