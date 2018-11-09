@@ -45,6 +45,10 @@ RequireTool(XMLLINT_PATH xmllint.sh)
 
 # Define default global flag information so that users can compile with the same basic architecture
 # flags as the kernel
+if("${TOOLCHAIN}" STREQUAL "clang-gcc")
+    string(APPEND c_common_flags " -Wno-tautological-constant-out-of-range-compare")
+    string(APPEND c_common_flags " -Qunused-arguments")
+endif()
 if(KernelArchX86)
     if(${KernelX86MicroArch} STREQUAL generic)
         set(build_arch "-mtune=generic")
@@ -146,6 +150,11 @@ add_compile_options(
     -Wall -Werror -Wstrict-prototypes -Wmissing-prototypes -Wnested-externs -Wmissing-declarations
     -Wundef -Wpointer-arith -Wno-nonnull -ffreestanding
 )
+if("${TOOLCHAIN}" STREQUAL "clang-gcc")
+    add_compile_options(
+        -Wno-uninitialized
+    )
+endif()
 
 # Add all the common flags to the linker args
 string(APPEND CMAKE_EXE_LINKER_FLAGS " -ffreestanding -Wl,--build-id=none -static -Wl,-n ")
